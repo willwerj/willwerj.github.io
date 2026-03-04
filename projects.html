@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Projects and interactive applets by Joshua Willwerth" />
+  <title>Projects — Joshua Willwerth</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="nav" role="navigation" aria-label="Main navigation">
+    <div class="nav__inner">
+      <a href="index.html" class="nav__brand">JW</a>
+      <button class="nav__toggle" id="nav-toggle" aria-controls="nav-links" aria-expanded="false" aria-label="Toggle navigation">
+        <span></span><span></span><span></span>
+      </button>
+      <ul class="nav__links" id="nav-links" role="list">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="projects.html">Projects</a></li>
+        <li><a href="repositories.html">Repositories</a></li>
+        <li><a href="resume.html">Résumé</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="page">
+
+    <!-- Page Header -->
+    <header class="page-header">
+      <div class="page-header__inner">
+        <h1 class="page-header__title">Projects &amp; Applets</h1>
+        <p class="page-header__subtitle">Interactive demos and mini-applications</p>
+      </div>
+    </header>
+
+    <!-- Projects Grid -->
+    <section class="section" aria-labelledby="projects-heading">
+      <div class="section__inner">
+        <h2 class="section__title" id="projects-heading">My Projects</h2>
+        <div class="section__divider" aria-hidden="true"></div>
+
+        <div class="cards-grid">
+
+          <!-- Project card template — replace or add cards as needed -->
+          <div class="card">
+            <span class="card__badge">Applet</span>
+            <h3 class="card__title">Sorting Visualiser</h3>
+            <p class="card__description">
+              An interactive step-by-step visualisation of common sorting algorithms
+              including Bubble Sort, Merge Sort, and Quick Sort. Watch each comparison
+              and swap in real time.
+            </p>
+            <div class="card__footer">
+              <span class="lang-tag">JavaScript</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <span class="card__badge">Applet</span>
+            <h3 class="card__title">Pathfinding Demo</h3>
+            <p class="card__description">
+              A grid-based pathfinding visualiser demonstrating Dijkstra's algorithm
+              and A*. Draw walls, place start and end nodes, and watch the algorithm
+              find the shortest path.
+            </p>
+            <div class="card__footer">
+              <span class="lang-tag">JavaScript</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <span class="card__badge">Tool</span>
+            <h3 class="card__title">Markdown Editor</h3>
+            <p class="card__description">
+              A lightweight, browser-based Markdown editor with a live split-pane
+              preview. Supports syntax highlighting and one-click copy of the
+              rendered HTML.
+            </p>
+            <div class="card__footer">
+              <span class="lang-tag">HTML / CSS / JS</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <span class="card__badge">Coming Soon</span>
+            <h3 class="card__title">More on the way…</h3>
+            <p class="card__description">
+              New projects and applets are in progress. Check back soon, or follow
+              me on GitHub to be notified when new work is published.
+            </p>
+            <div class="card__footer">
+              <a href="https://github.com/willwerj" class="btn btn--outline" target="_blank" rel="noopener noreferrer">Follow on GitHub</a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Joshua Willwerth. All rights reserved.</p>
+  </footer>
+
+  <script src="js/main.js"></script>
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>

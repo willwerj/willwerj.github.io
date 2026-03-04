@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GitHub repositories by Joshua Willwerth" />
+  <title>Repositories — Joshua Willwerth</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="nav" role="navigation" aria-label="Main navigation">
+    <div class="nav__inner">
+      <a href="index.html" class="nav__brand">JW</a>
+      <button class="nav__toggle" id="nav-toggle" aria-controls="nav-links" aria-expanded="false" aria-label="Toggle navigation">
+        <span></span><span></span><span></span>
+      </button>
+      <ul class="nav__links" id="nav-links" role="list">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="projects.html">Projects</a></li>
+        <li><a href="repositories.html">Repositories</a></li>
+        <li><a href="resume.html">Résumé</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="page">
+
+    <!-- Page Header -->
+    <header class="page-header">
+      <div class="page-header__inner">
+        <h1 class="page-header__title">GitHub Repositories</h1>
+        <p class="page-header__subtitle">Public repositories from <a href="https://github.com/willwerj" style="color:inherit;text-decoration:underline;" target="_blank" rel="noopener noreferrer">github.com/willwerj</a></p>
+      </div>
+    </header>
+
+    <!-- Repos Section -->
+    <section class="section" aria-labelledby="repos-heading">
+      <div class="section__inner">
+        <h2 class="section__title" id="repos-heading">My Repositories</h2>
+        <div class="section__divider" aria-hidden="true"></div>
+
+        <!-- Dynamic content injected by repos.js -->
+        <div id="repos-container">
+          <div class="spinner" role="status" aria-label="Loading repositories"></div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Joshua Willwerth. All rights reserved.</p>
+  </footer>
+
+  <script src="js/main.js"></script>
+  <script src="js/repos.js"></script>
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>
