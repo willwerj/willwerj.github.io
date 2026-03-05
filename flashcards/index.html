@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlashDeck — Study Sets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, collection, addDoc, getDocs, getDoc, doc, deleteDoc,
+    query, orderBy, serverTimestamp, onSnapshot, where }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  // ── PASTE YOUR FIREBASE CONFIG BELOW ──────────────────────────────────────
+  const firebaseConfig = {
+    apiKey: "AIzaSyBxm5ESOxJdCEjUb_2kSMAxbeqBIdgVIWE",
+    authDomain: "flashdeck-project.firebaseapp.com",
+    projectId: "flashdeck-project",
+    storageBucket: "flashdeck-project.firebasestorage.app",
+    messagingSenderId: "127368033937",
+    appId: "1:127368033937:web:de68a8fe77564d36b4f130"
+  };
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  let currentUser = null;
+  let currentSetId = null;
+  let currentCards = [];
+  let currentCardIndex = 0;
+  let isFlipped = false;
+  let unsubComments = null;
+
+  // ── AUTH ───────────────────────────────────────────────────────────────────
+  onAuthStateChanged(auth, user => {
+    currentUser = user;
+    renderAuthUI();
+  });
+
+  function renderAuthUI() {
+    const btn = document.getElementById('auth-btn');
+    const userInfo = document.getElementById('user-info');
+    if (currentUser) {
+      btn.textContent = 'Sign Out';
+      btn.onclick = () => signOut(auth);
+      userInfo.innerHTML = `<img src="${currentUser.photoURL}" alt="" class="avatar"><span class="user-name">${currentUser.displayName}</span>`;
+      userInfo.style.display = 'flex';
+    } else {
+      btn.textContent = 'Sign in with Google';
+      btn.onclick = () => signInWithPopup(auth, provider).catch(e => showToast(e.message, 'error'));
+      userInfo.innerHTML = '';
+      userInfo.style.display = 'none';
+    }
+    // Refresh create button state
+    const createBtn = document.getElementById('create-set-btn');
+    if (createBtn) createBtn.disabled = !currentUser;
+  }
+
+  // ── SIDEBAR: LOAD SETS ────────────────────────────────────────────────────
+  async function loadSets() {
+    const list = document.getElementById('set-list');
+    list.innerHTML = '<div class="sidebar-loading">Loading sets…</div>';
+    try {
+      const q = query(collection(db, 'flashcard_sets'), orderBy('createdAt', 'desc'));
+      onSnapshot(q, snapshot => {
+        list.innerHTML = '';
+        if (snapshot.empty) {
+          list.innerHTML = '<div class="sidebar-empty">No sets yet. Create one!</div>';
+          return;
+        }
+        snapshot.forEach(docSnap => {
+          const d = docSnap.data();
+          const item = document.createElement('div');
+          item.className = 'set-item' + (docSnap.id === currentSetId ? ' active' : '');
+          item.dataset.id = docSnap.id;
+          const ts = d.createdAt ? new Date(d.createdAt.seconds * 1000).toLocaleDateString() : '—';
+          item.innerHTML = `
+            <div class="set-item-title">${escHtml(d.name)}</div>
+            <div class="set-item-meta">
+              <span class="set-item-author">${escHtml(d.creatorName)}</span>
+              <span class="set-item-date">${ts}</span>
+            </div>
+            <div class="set-item-count">${d.cardCount || 0} cards</div>
+          `;
+          item.addEventListener('click', () => openSet(docSnap.id, d));
+          list.appendChild(item);
+        });
+      });
+    } catch (e) {
+      list.innerHTML = `<div class="sidebar-error">Error loading sets.</div>`;
+    }
+  }
+
+  // ── OPEN A SET ────────────────────────────────────────────────────────────
+  function openSet(id, data) {
+    currentSetId = id;
+    currentCards = data.cards || [];
+    currentCardIndex = 0;
+    isFlipped = false;
+
+    // Highlight sidebar
+    document.querySelectorAll('.set-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.id === id);
+    });
+
+    // Show study panel
+    document.getElementById('welcome-panel').style.display = 'none';
+    document.getElementById('study-panel').style.display = 'flex';
+
+    // Set title
+    document.getElementById('study-title').textContent = data.name;
+    document.getElementById('study-creator').textContent = `by ${data.creatorName}`;
+
+    // Render card
+    renderCard();
+
+    // Load comments
+    loadComments(id);
+
+    // Show delete button only for creator
+    const delBtn = document.getElementById('delete-set-btn');
+    delBtn.style.display = currentUser && currentUser.uid === data.creatorUid ? 'inline-flex' : 'none';
+    delBtn.onclick = () => deleteSet(id);
+  }
+
+  function renderCard() {
+    if (!currentCards.length) return;
+    const card = currentCards[currentCardIndex];
+    isFlipped = false;
+
+    const front = document.getElementById('card-front-content');
+    const back = document.getElementById('card-back-content');
+    const flipper = document.getElementById('card-flipper');
+    const badge = document.getElementById('card-type-badge');
+    const counter = document.getElementById('card-counter');
+
+    flipper.classList.remove('flipped');
+    front.innerHTML = renderMath(escHtml(card.question || ''));
+    back.innerHTML = renderMath(escHtml(card.answer || ''));
+    badge.textContent = (card.card_type || 'card').replace('_', '/');
+    badge.className = 'card-type-badge type-' + (card.card_type || 'definition');
+    counter.textContent = `${currentCardIndex + 1} / ${currentCards.length}`;
+
+    // Trigger MathJax if available
+    if (window.MathJax) MathJax.typesetPromise();
+
+    updateNavButtons();
+  }
+
+  function updateNavButtons() {
+    document.getElementById('prev-btn').disabled = currentCardIndex === 0;
+    document.getElementById('next-btn').disabled = currentCardIndex === currentCards.length - 1;
+  }
+
+  // ── CARD NAVIGATION ───────────────────────────────────────────────────────
+  window.flipCard = function() {
+    const flipper = document.getElementById('card-flipper');
+    isFlipped = !isFlipped;
+    flipper.classList.toggle('flipped', isFlipped);
+  };
+
+  window.prevCard = function() {
+    if (currentCardIndex > 0) { currentCardIndex--; renderCard(); }
+  };
+
+  window.nextCard = function() {
+    if (currentCardIndex < currentCards.length - 1) { currentCardIndex++; renderCard(); }
+  };
+
+  window.shuffleCards = function() {
+    for (let i = currentCards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [currentCards[i], currentCards[j]] = [currentCards[j], currentCards[i]];
+    }
+    currentCardIndex = 0;
+    renderCard();
+    showToast('Cards shuffled!');
+  };
+
+  window.resetCards = function() {
+    currentCardIndex = 0;
+    renderCard();
+  };
+
+  // Keyboard navigation
+  document.addEventListener('keydown', e => {
+    if (document.getElementById('study-panel').style.display === 'none') return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight') window.nextCard();
+    if (e.key === 'ArrowLeft') window.prevCard();
+    if (e.key === ' ') { e.preventDefault(); window.flipCard(); }
+  });
+
+  // ── CREATE SET ────────────────────────────────────────────────────────────
+  window.openCreateModal = function() {
+    if (!currentUser) { showToast('Please sign in to create a set.', 'error'); return; }
+    document.getElementById('create-modal').style.display = 'flex';
+    document.getElementById('set-name-input').value = '';
+    document.getElementById('csv-file-input').value = '';
+    document.getElementById('create-error').textContent = '';
+    document.getElementById('csv-preview').innerHTML = '';
+  };
+
+  window.closeCreateModal = function() {
+    document.getElementById('create-modal').style.display = 'none';
+  };
+
+  window.handleCsvUpload = function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const result = parseAndPreviewCsv(ev.target.result);
+      document.getElementById('csv-preview').innerHTML = result.html;
+      document.getElementById('create-error').textContent = result.error || '';
+    };
+    reader.readAsText(file);
+  };
+
+  function parseAndPreviewCsv(text) {
+    const REQUIRED = ['question', 'answer', 'card_type', 'concept_tag', 'chapter', 'source_file', 'page_number'];
+    try {
+      const rows = parseCsvText(text);
+      if (rows.length < 2) return { html: '', error: 'CSV must have a header row and at least one data row.' };
+      const headers = rows[0].map(h => h.trim().toLowerCase());
+      const missing = REQUIRED.filter(r => !headers.includes(r));
+      if (missing.length) return { html: '', error: `Missing required columns: ${missing.join(', ')}` };
+
+      const cards = rows.slice(1).filter(r => r.some(c => c.trim())).map(row => {
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = (row[i] || '').trim(); });
+        return obj;
+      });
+
+      if (!cards.length) return { html: '', error: 'No data rows found after the header.' };
+
+      const preview = cards.slice(0, 3).map(c => `
+        <div class="preview-card">
+          <div class="preview-q"><strong>Q:</strong> ${escHtml(c.question).substring(0, 120)}${c.question.length > 120 ? '…' : ''}</div>
+          <div class="preview-a"><strong>A:</strong> ${escHtml(c.answer).substring(0, 120)}${c.answer.length > 120 ? '…' : ''}</div>
+          <div class="preview-meta">${escHtml(c.card_type)} · ${escHtml(c.chapter)}</div>
+        </div>
+      `).join('');
+
+      return {
+        html: `<div class="preview-header">✓ ${cards.length} cards found — preview of first ${Math.min(3, cards.length)}:</div>${preview}`,
+        error: '',
+        cards
+      };
+    } catch (e) {
+      return { html: '', error: 'Could not parse CSV. Make sure it is a valid comma-separated file.' };
+    }
+  }
+
+  window.submitCreateSet = async function() {
+    const name = document.getElementById('set-name-input').value.trim();
+    const fileInput = document.getElementById('csv-file-input');
+    const errorEl = document.getElementById('create-error');
+    const submitBtn = document.getElementById('submit-create-btn');
+
+    errorEl.textContent = '';
+    if (!name) { errorEl.textContent = 'Please enter a name for your set.'; return; }
+    if (!fileInput.files[0]) { errorEl.textContent = 'Please upload a CSV file.'; return; }
+
+    const text = await fileInput.files[0].text();
+    const result = parseAndPreviewCsv(text);
+    if (result.error) { errorEl.textContent = result.error; return; }
+    if (!result.cards) { errorEl.textContent = 'No valid cards found.'; return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating…';
+    try {
+      const docRef = await addDoc(collection(db, 'flashcard_sets'), {
+        name,
+        cards: result.cards,
+        cardCount: result.cards.length,
+        creatorUid: currentUser.uid,
+        creatorName: currentUser.displayName,
+        creatorPhoto: currentUser.photoURL,
+        createdAt: serverTimestamp()
+      });
+      closeCreateModal();
+      showToast(`"${name}" created with ${result.cards.length} cards!`);
+    } catch (e) {
+      errorEl.textContent = 'Error saving set: ' + e.message;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create Set';
+    }
+  };
+
+  // ── DELETE SET ────────────────────────────────────────────────────────────
+  async function deleteSet(id) {
+    if (!confirm('Delete this flashcard set? This cannot be undone.')) return;
+    try {
+      await deleteDoc(doc(db, 'flashcard_sets', id));
+      // Also delete comments
+      const q = query(collection(db, 'comments'), where('setId', '==', id));
+      const snap = await getDocs(q);
+      snap.forEach(d => deleteDoc(d.ref));
+      document.getElementById('study-panel').style.display = 'none';
+      document.getElementById('welcome-panel').style.display = 'flex';
+      currentSetId = null;
+      showToast('Set deleted.');
+    } catch (e) {
+      showToast('Error deleting set: ' + e.message, 'error');
+    }
+  }
+
+  // ── COMMENTS ──────────────────────────────────────────────────────────────
+  function loadComments(setId) {
+    if (unsubComments) unsubComments();
+    const list = document.getElementById('comment-list');
+    list.innerHTML = '<div class="comment-loading">Loading comments…</div>';
+    const q = query(collection(db, 'comments'), where('setId', '==', setId), orderBy('createdAt', 'desc'));
+    unsubComments = onSnapshot(q, snap => {
+      list.innerHTML = '';
+      if (snap.empty) {
+        list.innerHTML = '<div class="comment-empty">No comments yet. Be the first!</div>';
+        return;
+      }
+      snap.forEach(d => {
+        const c = d.data();
+        const ts = c.createdAt ? new Date(c.createdAt.seconds * 1000).toLocaleString() : '';
+        const div = document.createElement('div');
+        div.className = 'comment';
+        div.innerHTML = `
+          <img src="${escHtml(c.authorPhoto || '')}" alt="" class="avatar">
+          <div class="comment-body">
+            <div class="comment-header">
+              <span class="comment-author">${escHtml(c.authorName)}</span>
+              <span class="comment-time">${ts}</span>
+              ${currentUser && currentUser.uid === c.authorUid ? `<button class="comment-delete-btn" onclick="deleteComment('${d.id}')">Delete</button>` : ''}
+            </div>
+            <div class="comment-text">${escHtml(c.text)}</div>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+    });
+  }
+
+  window.submitComment = async function() {
+    if (!currentUser) { showToast('Please sign in to comment.', 'error'); return; }
+    const input = document.getElementById('comment-input');
+    const text = input.value.trim();
+    if (!text) return;
+    if (!currentSetId) return;
+    try {
+      await addDoc(collection(db, 'comments'), {
+        setId: currentSetId,
+        text,
+        authorUid: currentUser.uid,
+        authorName: currentUser.displayName,
+        authorPhoto: currentUser.photoURL,
+        createdAt: serverTimestamp()
+      });
+      input.value = '';
+    } catch (e) {
+      showToast('Error posting comment: ' + e.message, 'error');
+    }
+  };
+
+  window.deleteComment = async function(id) {
+    try {
+      await deleteDoc(doc(db, 'comments', id));
+    } catch (e) {
+      showToast('Error deleting comment.', 'error');
+    }
+  };
+
+  // ── GUIDE MODAL ───────────────────────────────────────────────────────────
+  window.openGuide = function() { document.getElementById('guide-modal').style.display = 'flex'; };
+  window.closeGuide = function() { document.getElementById('guide-modal').style.display = 'none'; };
+
+  // ── UTILS ─────────────────────────────────────────────────────────────────
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function renderMath(str) {
+    // Unescape for MathJax — restore HTML entities inside $ delimiters
+    return str.replace(/\\\$/g, '&#36;');
+  }
+
+  function parseCsvText(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i], next = text[i + 1];
+      if (inQuotes) {
+        if (ch === '"' && next === '"') { field += '"'; i++; }
+        else if (ch === '"') { inQuotes = false; }
+        else { field += ch; }
+      } else {
+        if (ch === '"') { inQuotes = true; }
+        else if (ch === ',') { row.push(field); field = ''; }
+        else if (ch === '\n' || (ch === '\r' && next === '\n')) {
+          if (ch === '\r') i++;
+          row.push(field); field = '';
+          if (row.some(c => c.trim())) rows.push(row);
+          row = [];
+        } else { field += ch; }
+      }
+    }
+    if (field || row.length) { row.push(field); if (row.some(c => c.trim())) rows.push(row); }
+    return rows;
+  }
+
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + type;
+    setTimeout(() => t.className = 'toast', 3000);
+  }
+
+  // ── INIT ──────────────────────────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    loadSets();
+    // Close modals on backdrop click
+    document.getElementById('create-modal').addEventListener('click', e => {
+      if (e.target === document.getElementById('create-modal')) closeCreateModal();
+    });
+    document.getElementById('guide-modal').addEventListener('click', e => {
+      if (e.target === document.getElementById('guide-modal')) closeGuide();
+    });
+  });
+</script>
+
+<!-- MathJax for LaTeX rendering -->
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['$','$'], ['\\(','\\)']], displayMath: [['$$','$$']] },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+
+<style>
+:root {
+  --bg: #0f0f11;
+  --surface: #1a1a1e;
+  --surface2: #242428;
+  --surface3: #2e2e34;
+  --border: #333338;
+  --accent: #e8c547;
+  --accent2: #5b8dee;
+  --text: #f0eff0;
+  --text2: #9b9ba8;
+  --text3: #6b6b78;
+  --danger: #e05757;
+  --success: #4caf7d;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sidebar-w: 280px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+/* ── LAYOUT ── */
+.app {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  height: 100vh;
+}
+
+/* ── TOPBAR ── */
+.topbar {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  z-index: 10;
+}
+
+.logo {
+  font-family: 'DM Serif Display', serif;
+  font-size: 22px;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+}
+
+.logo span { color: var(--text2); font-style: italic; }
+
+.topbar-spacer { flex: 1; }
+
+.user-info {
+  display: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--accent);
+  flex-shrink: 0;
+}
+
+.user-name {
+  font-size: 13px;
+  color: var(--text2);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #111;
+}
+.btn-primary:hover:not(:disabled) { background: #f0d060; transform: translateY(-1px); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text2);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.btn-danger:hover { background: var(--danger); color: white; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.sidebar-list::-webkit-scrollbar { width: 4px; }
+.sidebar-list::-webkit-scrollbar-track { background: transparent; }
+.sidebar-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.set-item {
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.set-item:hover { background: var(--surface2); }
+.set-item.active {
+  background: var(--surface2);
+  border-color: var(--accent);
+}
+
+.set-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-item-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text3);
+  margin-bottom: 2px;
+}
+
+.set-item-count {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: 'DM Mono', monospace;
+}
+
+.sidebar-loading, .sidebar-empty, .sidebar-error {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text3);
+}
+
+/* ── MAIN PANEL ── */
+.main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── WELCOME PANEL ── */
+.welcome-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px;
+  text-align: center;
+}
+
+.welcome-icon {
+  font-size: 56px;
+  line-height: 1;
+}
+
+.welcome-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 32px;
+  color: var(--text);
+  letter-spacing: -0.5px;
+}
+
+.welcome-sub {
+  font-size: 15px;
+  color: var(--text2);
+  max-width: 380px;
+  line-height: 1.7;
+}
+
+.welcome-hint {
+  font-size: 12px;
+  color: var(--text3);
+  font-family: 'DM Mono', monospace;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 20px;
+}
+
+/* ── STUDY PANEL ── */
+.study-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.study-header {
+  padding: 20px 28px 0;
+  flex-shrink: 0;
+}
+
+.study-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.study-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 24px;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+}
+
+.study-creator {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+.study-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── FLASHCARD ── */
+.card-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.card-counter {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.card-wrap {
+  width: 100%;
+  max-width: 680px;
+  perspective: 1200px;
+}
+
+.card-flipper {
+  position: relative;
+  width: 100%;
+  height: 240px;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.card-flipper.flipped { transform: rotateY(180deg); }
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s;
+}
+
+.card-face:hover { border-color: var(--accent); }
+
+.card-back {
+  transform: rotateY(180deg);
+  background: var(--surface2);
+  border-color: var(--accent2);
+}
+
+.card-face-label {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+.card-back .card-face-label { color: var(--accent2); }
+
+.card-content {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text);
+  max-height: 180px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.card-content::-webkit-scrollbar { width: 3px; }
+.card-content::-webkit-scrollbar-thumb { background: var(--border); }
+
+.card-type-badge {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.type-definition { background: rgba(91,141,238,0.15); color: var(--accent2); }
+.type-true_false { background: rgba(76,175,125,0.15); color: var(--success); }
+.type-conceptual { background: rgba(232,197,71,0.15); color: var(--accent); }
+
+.card-hint {
+  font-size: 11px;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-hint kbd {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+/* ── CARD CONTROLS ── */
+.card-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.nav-btn {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.nav-btn:hover:not(:disabled) { background: var(--surface2); border-color: var(--accent); color: var(--accent); }
+.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── PROGRESS BAR ── */
+.progress-bar-wrap {
+  width: 100%;
+  max-width: 680px;
+  height: 3px;
+  background: var(--surface2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+  border-radius: 2px;
+}
+
+/* ── COMMENTS ── */
+.comments-section {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.comments-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 18px;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.comment-input-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  align-items: flex-start;
+}
+
+.comment-input-row .avatar { margin-top: 4px; }
+
+.comment-textarea {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  padding: 10px 14px;
+  resize: none;
+  min-height: 80px;
+  transition: border-color 0.15s;
+  outline: none;
+}
+
+.comment-textarea:focus { border-color: var(--accent2); }
+.comment-textarea::placeholder { color: var(--text3); }
+
+.comment-submit-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sign-in-prompt {
+  font-size: 13px;
+  color: var(--text3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.sign-in-prompt a {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.comment-list { display: flex; flex-direction: column; gap: 12px; }
+
+.comment {
+  display: flex;
+  gap: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.comment-body { flex: 1; }
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.comment-author {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.comment-time {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: 'DM Mono', monospace;
+}
+
+.comment-text {
+  font-size: 14px;
+  color: var(--text2);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.comment-delete-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.comment-delete-btn:hover { color: var(--danger); background: rgba(224,87,87,0.1); }
+
+.comment-loading, .comment-empty {
+  font-size: 13px;
+  color: var(--text3);
+  padding: 12px 0;
+}
+
+/* ── MODALS ── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  animation: modalIn 0.2s ease;
+}
+
+@keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: none; } }
+
+.modal-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 20px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.modal-close:hover { color: var(--text); background: var(--surface2); }
+
+.modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+
+.form-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+.form-input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.form-input:focus { border-color: var(--accent2); }
+
+.file-upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+.file-upload-area:hover { border-color: var(--accent2); background: rgba(91,141,238,0.05); }
+.file-upload-area input[type=file] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer;
+}
+.file-upload-label {
+  font-size: 13px;
+  color: var(--text2);
+  pointer-events: none;
+}
+.file-upload-label span { color: var(--accent2); }
+
+.form-error {
+  font-size: 12px;
+  color: var(--danger);
+  min-height: 18px;
+}
+
+.csv-preview {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 12px;
+}
+
+.preview-header {
+  color: var(--success);
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+
+.preview-card {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.preview-q { color: var(--text2); margin-bottom: 3px; }
+.preview-a { color: var(--text3); margin-bottom: 3px; }
+.preview-meta {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ── GUIDE ── */
+.guide-body { padding: 20px 24px; font-size: 13px; color: var(--text2); line-height: 1.7; }
+.guide-body h3 {
+  font-family: 'DM Serif Display', serif;
+  font-size: 16px;
+  color: var(--text);
+  margin: 20px 0 8px;
+}
+.guide-body h3:first-child { margin-top: 0; }
+.guide-body p { margin-bottom: 8px; }
+.guide-body ul { padding-left: 18px; margin-bottom: 8px; }
+.guide-body li { margin-bottom: 4px; }
+.guide-body code {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--accent);
+}
+.guide-body .guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.guide-table th, .guide-table td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+}
+.guide-table th {
+  background: var(--surface2);
+  color: var(--text);
+  font-weight: 600;
+}
+.guide-table td:first-child { font-family: 'DM Mono', monospace; color: var(--accent); }
+.guide-example {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--text2);
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.8;
+}
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 18px;
+  font-size: 13px;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.25s;
+  pointer-events: none;
+  z-index: 200;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast.success { border-color: var(--success); color: var(--success); }
+.toast.error { border-color: var(--danger); color: var(--danger); }
+
+/* ── SCROLLBAR ── */
+.study-body::-webkit-scrollbar { width: 4px; }
+.study-body::-webkit-scrollbar-track { background: transparent; }
+.study-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── PROGRESS UPDATE ── */
+.card-flipper:hover .card-face { box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="logo">Flash<span>Deck</span></div>
+    <div class="topbar-spacer"></div>
+    <div id="user-info" class="user-info"></div>
+    <button class="btn btn-ghost" onclick="openGuide()">📖 CSV Guide</button>
+    <button id="auth-btn" class="btn btn-ghost">Sign in with Google</button>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Flashcard Sets</span>
+      <button id="create-set-btn" class="btn btn-primary" onclick="openCreateModal()" style="padding:5px 10px;font-size:12px;">+ New</button>
+    </div>
+    <div class="sidebar-list" id="set-list"></div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- WELCOME -->
+    <div id="welcome-panel" class="welcome-panel">
+      <div class="welcome-icon">🃏</div>
+      <h1 class="welcome-title">Start studying</h1>
+      <p class="welcome-sub">Select a flashcard set from the sidebar, or create your own by uploading a CSV file.</p>
+      <div class="welcome-hint">← press Space to flip · ← → to navigate</div>
+    </div>
+
+    <!-- STUDY PANEL -->
+    <div id="study-panel" class="study-panel" style="display:none;">
+      <div class="study-header">
+        <div class="study-header-top">
+          <div>
+            <div id="study-title" class="study-title"></div>
+            <div id="study-creator" class="study-creator"></div>
+          </div>
+          <button id="delete-set-btn" class="btn btn-danger" style="display:none;">🗑 Delete Set</button>
+        </div>
+      </div>
+
+      <div class="study-body">
+
+        <!-- CARD -->
+        <div class="card-area">
+          <div class="card-counter" id="card-counter">1 / 1</div>
+
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+          </div>
+
+          <div class="card-wrap">
+            <div class="card-flipper" id="card-flipper" onclick="flipCard()">
+              <div class="card-face card-front">
+                <div class="card-face-label">Question</div>
+                <span class="card-type-badge" id="card-type-badge">definition</span>
+                <div class="card-content" id="card-front-content"></div>
+              </div>
+              <div class="card-face card-back">
+                <div class="card-face-label">Answer</div>
+                <div class="card-content" id="card-back-content"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-hint">
+            <kbd>Space</kbd> flip &nbsp;
+            <kbd>←</kbd><kbd>→</kbd> navigate
+          </div>
+
+          <div class="card-controls">
+            <button class="nav-btn" id="prev-btn" onclick="prevCard()" title="Previous">‹</button>
+            <button class="btn btn-ghost" onclick="shuffleCards()" style="font-size:12px;">⇄ Shuffle</button>
+            <button class="btn btn-ghost" onclick="resetCards()" style="font-size:12px;">↺ Reset</button>
+            <button class="nav-btn" id="next-btn" onclick="nextCard()" title="Next">›</button>
+          </div>
+        </div>
+
+        <!-- COMMENTS -->
+        <div class="comments-section">
+          <div class="comments-title">Discussion</div>
+
+          <div id="comment-input-area">
+            <!-- Populated by JS based on auth state -->
+          </div>
+
+          <div class="comment-list" id="comment-list"></div>
+        </div>
+
+      </div><!-- /study-body -->
+    </div><!-- /study-panel -->
+
+  </main>
+</div>
+
+<!-- CREATE MODAL -->
+<div class="modal-overlay" id="create-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Create Flashcard Set</div>
+      <button class="modal-close" onclick="closeCreateModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Set Name</label>
+        <input id="set-name-input" class="form-input" type="text" placeholder="e.g. Chapter 1 — Probability Review" maxlength="100">
+      </div>
+      <div class="form-group">
+        <label class="form-label">CSV File</label>
+        <div class="file-upload-area">
+          <input type="file" accept=".csv,text/csv" id="csv-file-input" onchange="handleCsvUpload(event)">
+          <div class="file-upload-label">Drop a CSV file here or <span>click to browse</span></div>
+        </div>
+      </div>
+      <div id="csv-preview" class="csv-preview" style="display:none;"></div>
+      <div class="form-error" id="create-error"></div>
+      <p style="font-size:12px;color:var(--text3);">
+        Not sure about the format? <a onclick="closeCreateModal();openGuide();" style="color:var(--accent);cursor:pointer;">Read the CSV guide →</a>
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeCreateModal()">Cancel</button>
+      <button id="submit-create-btn" class="btn btn-primary" onclick="submitCreateSet()">Create Set</button>
+    </div>
+  </div>
+</div>
+
+<!-- GUIDE MODAL -->
+<div class="modal-overlay" id="guide-modal">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-title">CSV Format Guide</div>
+      <button class="modal-close" onclick="closeGuide()">×</button>
+    </div>
+    <div class="guide-body">
+      <h3>Overview</h3>
+      <p>Flashcard sets are created from a <strong>CSV (comma-separated values)</strong> file. Each row becomes one flashcard. The first row must be a header row with exact column names.</p>
+
+      <h3>Required Columns</h3>
+      <p>Your CSV must include all seven of these columns (in any order):</p>
+      <table class="guide-table">
+        <tr><th>Column</th><th>Description</th></tr>
+        <tr><td>question</td><td>The front of the card (what is shown first)</td></tr>
+        <tr><td>answer</td><td>The back of the card (revealed on flip)</td></tr>
+        <tr><td>card_type</td><td>One of: <code>definition</code>, <code>true_false</code>, <code>conceptual</code></td></tr>
+        <tr><td>concept_tag</td><td>The named concept this card relates to (e.g. "Entropy")</td></tr>
+        <tr><td>chapter</td><td>The chapter or section this card belongs to</td></tr>
+        <tr><td>source_file</td><td>Filename or URL of the original source material</td></tr>
+        <tr><td>page_number</td><td>Page number in the source (or N/A)</td></tr>
+      </table>
+
+      <h3>LaTeX Support</h3>
+      <p>Math expressions are supported using LaTeX notation. Wrap inline math in <code>$…$</code> and display math in <code>$$…$$</code>. Example: <code>$P(k) = \frac{e^{-\lambda}\lambda^k}{k!}$</code></p>
+
+      <h3>Important Formatting Rules</h3>
+      <ul>
+        <li>If a field contains a <strong>comma</strong>, wrap the entire field in <strong>double quotes</strong>: <code>"mean, variance"</code></li>
+        <li>If a field contains a <strong>double quote</strong>, escape it by doubling it: <code>"He said ""hello"""</code></li>
+        <li>Do not leave the <code>question</code> or <code>answer</code> fields empty</li>
+        <li>Column names are case-insensitive but must match exactly otherwise</li>
+      </ul>
+
+      <h3>Example</h3>
+      <div class="guide-example">chapter,concept_tag,card_type,question,answer,source_file,page_number
+Chapter 1,Entropy,definition,What is entropy?,The average uncertainty of a distribution.,notes.pdf,5
+Chapter 1,Binomial,true_false,"True or False: $\binom{n}{k}$ counts sequences with k heads.","True. It counts the number of ways to choose k slots out of n.",notes.pdf,8
+Chapter 2,Fokker-Planck,conceptual,"What does the Fokker-Planck equation govern?","It governs how a probability density $\varrho(x,t)$ evolves under an SDE.",notes.pdf,12</div>
+
+      <h3>Common Errors</h3>
+      <ul>
+        <li><strong>"Missing required columns"</strong> — Check spelling and case of your header row</li>
+        <li><strong>"Could not parse CSV"</strong> — Usually means unescaped commas or quotes. Wrap the field in double quotes</li>
+        <li><strong>"No data rows found"</strong> — Your file only has a header row and no card data</li>
+      </ul>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeGuide()">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// Non-module glue: update progress bar and comment input on card change
+// (runs after the module sets currentCardIndex)
+const origRenderCard = window.flipCard;
+
+// Progress bar observer
+const progressObserver = new MutationObserver(() => {
+  const counter = document.getElementById('card-counter');
+  if (!counter) return;
+  const [cur, total] = counter.textContent.split('/').map(s => parseInt(s.trim()));
+  const fill = document.getElementById('progress-fill');
+  if (fill && total) fill.style.width = (cur / total * 100) + '%';
+});
+progressObserver.observe(document.getElementById('card-counter') || document.body, {
+  childList: true, subtree: true, characterData: true
+});
+
+// Rebuild comment input based on auth (poll every 500ms as fallback)
+setInterval(() => {
+  const panel = document.getElementById('study-panel');
+  if (!panel || panel.style.display === 'none') return;
+  const area = document.getElementById('comment-input-area');
+  if (!area) return;
+  const user = typeof currentUser !== 'undefined' ? currentUser : null;
+  const hasTextarea = area.querySelector('textarea');
+  const hasPrompt = area.querySelector('.sign-in-prompt');
+  if (user && !hasTextarea) {
+    area.innerHTML = `
+      <div class="comment-input-row">
+        <img src="${user.photoURL || ''}" alt="" class="avatar">
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+          <textarea id="comment-input" class="comment-textarea" placeholder="Add a comment…" rows="3"
+            onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))submitComment()"></textarea>
+          <div style="display:flex;justify-content:flex-end;">
+            <button class="btn btn-primary" onclick="submitComment()" style="font-size:13px;">Post</button>
+          </div>
+        </div>
+      </div>`;
+  } else if (!user && !hasPrompt) {
+    area.innerHTML = `<div class="sign-in-prompt">
+      <a onclick="document.getElementById('auth-btn').click()">Sign in with Google</a> to leave a comment.
+    </div>`;
+  }
+}, 500);
+
+// Show csv preview div when content is added
+const previewEl = document.getElementById('csv-preview');
+new MutationObserver(() => {
+  previewEl.style.display = previewEl.innerHTML ? 'block' : 'none';
+}).observe(previewEl, { childList: true, subtree: true });
+</script>
+
+</body>
+</html>
