@@ -320,26 +320,20 @@ ul {
   border-color: var(--color-accent-light);
 }
 
-/* Base icon wrapper — no background, no border */
 .contact-card__icon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Default icon colour — overridden per-brand below */
   color: var(--color-primary);
 }
 
-/* Default SVG size */
 .contact-card__icon svg {
   width: 24px;
   height: 24px;
   display: block;
 }
 
-/* ---- Per-brand colour overrides ---- */
-
-/* GitHub: black, 20% larger than base 24px = ~29px */
 .contact-card__icon--github {
   color: #000000;
 }
@@ -348,15 +342,10 @@ ul {
   height: 29px;
 }
 
-/* LinkedIn: official brand blue */
 .contact-card__icon--linkedin {
   color: #0A66C2;
 }
 
-/* ORCID SVG is self-coloured (fills hardcoded in the SVG),
-   so no colour override needed here */
-
-/* ---- Text column ---- */
 .contact-card__text {
   min-width: 0;
   flex: 1;
@@ -451,6 +440,7 @@ ul {
   margin-bottom: 0.85rem;
   background: var(--color-accent-light);
   color: var(--color-primary);
+  align-self: flex-start;
 }
 
 .card__title {
@@ -465,17 +455,69 @@ ul {
   color: var(--color-text-muted);
   flex: 1;
   line-height: 1.65;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.1rem;
 }
 
+/* ===========================
+   Card Thumbnail (optional)
+   =========================== */
+.card__thumbnail {
+  /* 80% of card width, centred */
+  width: 80%;
+  margin: 0 auto 1.1rem;
+  /* Let height grow naturally with the image */
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  /* Establish a containing block for the zoom transition */
+  container-type: inline-size;
+}
+
+.card__thumbnail img {
+  width: 100%;
+  /* Square crop: height = width */
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+  transition: transform 0.35s ease;
+}
+
+.card:hover .card__thumbnail img {
+  transform: scale(1.03);
+}
+
+/* ===========================
+   Card Footer
+   =========================== */
 .card__footer {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  gap: 0.6rem;
   margin-top: auto;
+  overflow: hidden;
+  min-width: 0;
 }
 
+/* ===========================
+   Card Authorship (optional)
+   =========================== */
+.card__authors {
+  margin-left: auto;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: clamp(0.62rem, 1.8cqi, 0.78rem);
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* ===========================
+   Buttons
+   =========================== */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -488,6 +530,8 @@ ul {
   border: none;
   transition: background var(--transition), color var(--transition);
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn--primary {

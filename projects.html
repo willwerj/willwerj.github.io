@@ -46,46 +46,78 @@
 
         <div class="cards-grid">
 
-          <!-- Project card template — replace or add cards as needed -->
+          <!--
+            CARD TEMPLATE (copy & paste to add new cards)
+            ================================================
+            - card__thumbnail: optional — remove the entire <div> if no image
+            - card__authors: optional — remove the entire <span> if no authorship
+            
+            <div class="card">
+              <span class="card__badge">Badge text</span>
+              <h3 class="card__title">Title</h3>
+              <p class="card__description">Description text.</p>
+              [OPTIONAL] <div class="card__thumbnail">
+                           <img src="images/your-thumb.png" alt="Brief description" />
+                         </div>
+              <div class="card__footer">
+                <a href="URL" class="btn btn--outline" target="_blank" rel="noopener noreferrer">Open app</a>
+                [OPTIONAL] <span class="card__authors">A. Author, B. Author et al.</span>
+              </div>
+            </div>
+          -->
+
+          <!-- Card: Binary Phase Diagram Map (thumbnail + authors) -->
           <div class="card">
-            <span class="card__badge">Applet</span>
-            <h3 class="card__title">Sorting Visualiser</h3>
+            <span class="card__badge">GLiquid Project</span>
+            <h3 class="card__title">Binary Phase Diagram Map</h3>
             <p class="card__description">
-              An interactive step-by-step visualisation of common sorting algorithms
-              including Bubble Sort, Merge Sort, and Quick Sort. Watch each comparison
-              and swap in real time.
+              An interactive matrix of DFT-referenced phase diagrams fitted from experimental assessments. This tool
+              allows users to explore the data provenance for fitted non-ideal mixing parameters, which forms the basis
+              for the GLiquid database.
             </p>
+            <div class="card__thumbnail">
+              <img src="images/interactive_matrix.webp" alt="Binary Phase Diagram Map preview" />
+            </div>
             <div class="card__footer">
-              <span class="lang-tag">JavaScript</span>
+              <a href="https://viz.whsunresearch.group/gliquid/interactive-matrix.html" class="btn btn--outline" target="_blank" rel="noopener noreferrer">Open app</a>
+              <span class="card__authors">J. Willwerth et al.</span>
             </div>
           </div>
 
+          <!-- Card: Ternary Phase Diagram Plotter (thumbnail + authors) -->
           <div class="card">
-            <span class="card__badge">Applet</span>
-            <h3 class="card__title">Pathfinding Demo</h3>
+            <span class="card__badge">GLiquid Project</span>
+            <h3 class="card__title">Ternary Phase Diagram Plotter</h3>
             <p class="card__description">
-              A grid-based pathfinding visualiser demonstrating Dijkstra's algorithm
-              and A*. Draw walls, place start and end nodes, and watch the algorithm
-              find the shortest path.
+              A web app for generating ternary liquidus surfaces from a specified system of three elements. This app
+              interpolates between the GLiquid-fitted binary phase diagrams to generate a high-temperature ternary
+              phase diagram without additional ternary correction parameters.
             </p>
+            <div class="card__thumbnail">
+              <img src="images/ternary_liquidus.webp" alt="Ternary Phase Diagram Plotter preview" />
+            </div>
             <div class="card__footer">
-              <span class="lang-tag">JavaScript</span>
+              <a href="https://viz.whsunresearch.group/gliquid/ternary-interpolation/" class="btn btn--outline" target="_blank" rel="noopener noreferrer">Open app</a>
+              <span class="card__authors">A. Rauf, J. Willwerth et al.</span>
             </div>
           </div>
 
+          <!-- Card: Flashdeck (no thumbnail, no authors) -->
           <div class="card">
-            <span class="card__badge">Tool</span>
-            <h3 class="card__title">Markdown Editor</h3>
+            <span class="card__badge">Personal</span>
+            <h3 class="card__title">Flashdeck</h3>
             <p class="card__description">
-              A lightweight, browser-based Markdown editor with a live split-pane
-              preview. Supports syntax highlighting and one-click copy of the
-              rendered HTML.
+              A quiz app that creates flashcard decks from user-provided CSV files. Users can review and test their
+              knowledge on any topic by creating custom flashcard decks and using the built-in quiz mode.
             </p>
+            <!-- No thumbnail -->
             <div class="card__footer">
-              <span class="lang-tag">HTML / CSS / JS</span>
+              <a href="https://willwerj.github.io/flashcards/" class="btn btn--outline" target="_self" rel="noopener noreferrer">Open app</a>
+              <!-- No authorship -->
             </div>
           </div>
 
+          <!-- Card: Coming Soon (no thumbnail, no authors) -->
           <div class="card">
             <span class="card__badge">Coming Soon</span>
             <h3 class="card__title">More on the way…</h3>
@@ -93,8 +125,10 @@
               New projects and applets are in progress. Check back soon, or follow
               me on GitHub to be notified when new work is published.
             </p>
+            <!-- No thumbnail -->
             <div class="card__footer">
               <a href="https://github.com/willwerj" class="btn btn--outline" target="_blank" rel="noopener noreferrer">Follow on GitHub</a>
+              <!-- No authorship -->
             </div>
           </div>
 
